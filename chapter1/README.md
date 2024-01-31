@@ -51,3 +51,85 @@ memoryAccess.Unlock()
 
 4. 순환 대기(Circular Wait)
 - 동시에 실행되는 프로세스가 서로를 기다림
+
+```go
+type value struct {
+	mu sync.Mutex
+	value int
+}
+
+var wg sync.WaitGroup
+printSum := func(v1, v2 *value) {
+	defer wg.Done()
+	v1.mu.Lock()
+	defer v1.mu.Unlock()
+	
+	time.Sleep(2*time.Second)
+	v2.mu.Lock()
+	defer v2.mu.Unlock()
+	
+	fmt.Printf("sum=%v\n", v1.value, v2.value)
+}
+
+var a, b value
+wg.Add(2)
+go printSum(&a, &b)
+go printSum(&b, &a)
+wg.Wait()
+```
+
+1. 상호 배제
+   1. `printSum(&a, &b)` 와 `printSum(&b, &a)` 는 서로 다른 각기의 프로세스이고 a와 b에 대해 배타적 권리를 가진다
+2. 대기 조건
+   1. `printSum(&a, &b)` 의 경우에는 a 리소스를 확보함과 동시에 b 리소스를 기다리고 있다
+3. 비선점
+   1. `printSum(&a, &b)` 는 a 리소스를 공유할 수 있는 여지를 주지 않는다
+4. 순환 대기
+   1. `printSum(&a, &b)` 와 `printSum(&b, &a)` 는 서로 비선점이 되기를 기다리고 있다
+
+## Starvation
+
+&rarr; Mainly resolved by the critical area
+
+```go
+var wg sync.WaitGroup
+var sharedLock sync.Mutex
+const runtime = 1*time.Second
+
+greedyWorker := func() {
+	defer wg.Done()
+	
+	var count int
+	for begin := time.Now(); time.Since(begin) <= runtime; {
+		sharedLock.Lock()
+		time.Sleep(3*time.Nanosecond)
+		sharedLock.Unlock()
+		count ++
+        }
+	
+	fmt.Printf("Greedy worker was able to execute %v work loops\n", count)
+}
+
+politeWorker := func() {
+    defer wg.Done()
+    
+    var count int
+    for begin := time.Now(); time.Since(begin) <= runtime; {
+        sharedLock.Lock()
+        time.Sleep(1*time.Nanosecond)
+        sharedLock.Unlock()
+
+        sharedLock.Lock()
+        time.Sleep(1*time.Nanosecond)
+        sharedLock.Unlock()
+		
+        sharedLock.Lock()
+        time.Sleep(1*time.Nanosecond)
+        sharedLock.Unlock()
+        count ++
+    }
+    
+    fmt.Printf("Polite worker was able to execute %v work loops\n", count)
+}
+```
+Greedyworker 는 PoliteWorker 가 자원을 차지할 여지 조차를 없애 버린다 &rarr; 피해를 유발하는 것으로 생각하면 된다
